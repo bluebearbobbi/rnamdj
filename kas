@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Ultra-simple script to delete Black Duck projects by ID from CSV (one ID per line).
+# Usage: ./simple_delete.sh <csv_file> <blackduck_url> <bearer_token>
+# Add -k to curl commands below if SSL cert issues (e.g., self-signed).
+# Fails on HTTP 4xx/5xx via -f; echoes success/fail per ID.
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <csv_file> <blackduck_url> <bearer_token>"
+    exit 1
+fi
+
+CSV_FILE="$1"
+BLACKDUCK_URL="$2"
+BEARER_TOKEN="$3"
+
+# Normalize: Ensure /api at end
+BASE_URL="${BLACKDUCK_URL%/}/api"
+
+while read -r project_id; do
+    project_id=$(echo "$project_id" | xargs)
+    if [ -z "$project_id" ]; then
+        continue
+    fi
+
+    echo "Deleting project: $project_id"
+    # Add -k here for insecure SSL: curl -k -f -s ...
+    if curl -f -s -X DELETE "${BASE_URL}/projects/${project_id}" \
+        -H "Authorization: Bearer ${BEARER_TOKEN}" \
+        -H "Accept: application/json" >/dev/null 2>&1; then
+        echo "  Success."
+    else
+        echo "  Failed (check token/permissions/URL)."
+    fi
+
+done < "$CSV_FILE"
+
+echo "Done."
