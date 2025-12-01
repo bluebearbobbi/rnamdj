@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Simple script to delete Black Duck projects by ID from a CSV file via REST API.
+# Assumptions:
+# - CSV file has one project ID per line.
+# - Run with: ./delete_projects.sh <csv_file> <blackduck_url> <api_token>
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <csv_file> <blackduck_url> <api_token>"
+    exit 1
+fi
+
+CSV_FILE="$1"
+BLACKDUCK_URL="$2"
+API_TOKEN="$3"
+
+BASE_URL="${BLACKDUCK_URL}/api"
+
+while read -r project_id; do
+    project_id=$(echo "$project_id" | xargs)
+    if [ -z "$project_id" ]; then
+        continue
+    fi
+
+    project_href="/projects/${project_id}"
+
+    # Verify and delete in one go: attempt GET first
+    verify_response=$(curl -s -X GET "${BASE_URL}${project_href}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json")
+
+    if [[ "$verify_response" == *"error"* ]] || [[ "$verify_response" == *"not found"* ]]; then
+        echo "Error: Project ID '$project_id' not found."
+        continue
+    fi
+
+    # Delete the project
+    delete_response=$(curl -s -X DELETE "${BASE_URL}${project_href}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json")
+
+    if [[ "$delete_response" == *"error"* ]]; then
+        echo "Error: Failed to delete project $project_id: $delete_response"
+    else
+        echo "Deleted project: $project_id"
+    fi
+
+done < "$CSV_FILE"
+
+echo "Done."
