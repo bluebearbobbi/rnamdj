@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Fixed script for Black Duck project deletion: Handles SSL with -k, robust parsing.
+# Assumptions: One project ID per line in CSV. Pass base URL (e.g., https://your-hub.com).
+# Run with: ./delete_projects_ssl_fixed.sh <csv_file> <blackduck_url> <api_token>
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <csv_file> <blackduck_url> <api_token>"
+    exit 1
+fi
+
+CSV_FILE="$1"
+BLACKDUCK_URL="$2"
+API_TOKEN="$3"
+
+# Normalize URL: Strip trailing /api if present, then append /api
+BLACKDUCK_URL="${BLACKDUCK_URL%/api}"
+BASE_URL="${BLACKDUCK_URL}/api"
+
+echo "Using API base: $BASE_URL"
+
+# Pre-flight: Test API access with -k
+preflight=$(curl -k -s -o /dev/null -w "%{http_code}" -X GET "${BASE_URL}/current-user" \
+    -H "Authorization: Bearer ${API_TOKEN}")
+if [ "$preflight" != "200" ]; then
+    echo "Error: API access failed (Status: $preflight). Check URL/token/network."
+    exit 1
+fi
+echo "API access confirmed (SSL bypassed)."
+
+while read -r project_id; do
+    project_id=$(echo "$project_id" | xargs)
+    if [ -z "$project_id" ]; then
+        continue
+    fi
+
+    echo "Processing project ID: $project_id"
+    project_href="/projects/${project_id}"
+
+    # Verify: GET with -k and status
+    verify_output=$(curl -k -s -i -w "\n%{http_code}" -X GET "${BASE_URL}${project_href}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json" 2>/dev/null)
+    if [ -z "$verify_output" ]; then
+        echo "Error: Curl failed for '$project_id' (empty output)."
+        continue
+    fi
+
+    # Safer parsing: Split on last newline for status
+    verify_status=$(echo "$verify_output" | tail -n1)
+    verify_body=$(echo "$verify_output" | head -n -1)
+
+    if [ "$verify_status" != "200" ]; then
+        echo "Error: Project ID '$project_id' not found or inaccessible (Status: $verify_status)."
+        if [ -n "$verify_body" ] && [[ "$verify_body" != *"\r"* ]]; then  # Skip if just headers
+            echo "Response body: $(echo "$verify_body" | tr -d '\r')"
+        fi
+        continue
+    fi
+
+    echo "  Verified project exists (Status: $verify_status)."
+
+    # Delete with -k and status
+    delete_output=$(curl -k -s -i -w "\n%{http_code}" -X DELETE "${BASE_URL}${project_href}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json" 2>/dev/null)
+    if [ -z "$delete_output" ]; then
+        echo "Error: Delete curl failed for '$project_id'."
+        continue
+    fi
+
+    delete_status=$(echo "$delete_output" | tail -n1)
+    delete_body=$(echo "$delete_output" | head -n -1)
+
+    if [ "$delete_status" != "204" ]; then
+        echo "Error: Failed to delete project $project_id (Status: $delete_status)."
+        if [ -n "$delete_body" ] && [[ "$delete_body" != *"\r"* ]]; then
+            echo "Response body: $(echo "$delete_body" | tr -d '\r')"
+        fi
+    else
+        echo "Successfully deleted project: $project_id (Status: $delete_status)."
+    fi
+
+done < "$CSV_FILE"
+
+echo "Done."
