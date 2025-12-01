@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# Simple script to delete Black Duck projects by ID from CSV (one ID per line).
+# Takes API token, generates bearer token, then deletes.
+# Usage: ./simple_delete.sh <csv_file> <blackduck_url> <api_token>
+# Includes -k for SSL cert bypass (self-signed/internal).
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <csv_file> <blackduck_url> <api_token>"
+    exit 1
+fi
+
+CSV_FILE="$1"
+BLACKDUCK_URL="$2"
+API_TOKEN="$3"
+
+# Normalize URL to end with /api
+BASE_URL="${BLACKDUCK_URL%/}/api"
+
+# Authenticate to get bearer token
+echo "Authenticating..."
+AUTH_RESPONSE=$(curl -k -s -X POST "${BASE_URL}/tokens/authenticate" \
+    -H "Authorization: token ${API_TOKEN}" \
+    -H "Content-Type: application/json")
+
+BEARER_TOKEN=$(echo "$AUTH_RESPONSE" | grep -o '"bearerToken":"[^"]*' | cut -d'"' -f4 | head -n1)
+
+if [ -z "$BEARER_TOKEN" ]; then
+    echo "Error: Failed to get bearer token. Check API token and URL."
+    echo "Response: $AUTH_RESPONSE"
+    exit 1
+fi
+
+echo "Bearer token obtained."
+
+# Delete projects
+while read -r project_id; do
+    project_id=$(echo "$project_id" | xargs)
+    if [ -z "$project_id" ]; then
+        continue
+    fi
+
+    echo "Deleting project: $project_id"
+    if curl -k -f -s -X DELETE "${BASE_URL}/projects/${project_id}" \
+        -H "Authorization: Bearer ${BEARER_TOKEN}" \
+        -H "Accept: application/json" >/dev/null 2>&1; then
+        echo "  Success."
+    else
+        echo "  Failed."
+    fi
+
+done < "$CSV_FILE"
+
+echo "Done."
