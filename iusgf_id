@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Script to delete Black Duck projects listed in a CSV file via REST API.
+# Script to delete Black Duck projects by ID listed in a CSV file via REST API.
 # Assumptions:
-# - CSV file has project names in the first column (e.g., "project1,other,stuff"), one per line.
+# - CSV file has project IDs in the first column (e.g., "project-id-123,other,stuff"), one per line.
 # - No header row, or skip it manually if present.
 # - Requires 'jq' for JSON parsing (install via package manager if needed).
 # - Projects must have no dependencies beyond code locations and versions (script deletes those first).
-# - Run with: ./delete_projects.sh <csv_file> <blackduck_url> <api_token>
-# Example: ./delete_projects.sh projects.csv https://your-blackduck.com eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+# - Run with: ./delete_projects_by_id.sh <csv_file> <blackduck_url> <api_token>
+# Example: ./delete_projects_by_id.sh projects.csv https://your-blackduck.com eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 
 if [ $# -ne 3 ]; then
     echo "Usage: $0 <csv_file> <blackduck_url> <api_token>"
@@ -31,29 +31,27 @@ make_request() {
         "$@"
 }
 
-# Read CSV and process each project name
-while IFS=',' read -r project_name rest; do
-    # Trim whitespace from project_name
-    project_name=$(echo "$project_name" | xargs)
-    if [ -z "$project_name" ]; then
+# Read CSV and process each project ID
+while IFS=',' read -r project_id rest; do
+    # Trim whitespace from project_id
+    project_id=$(echo "$project_id" | xargs)
+    if [ -z "$project_id" ]; then
         continue
     fi
 
-    echo "Processing project: $project_name"
+    echo "Processing project ID: $project_id"
 
-    # Search for the project by exact name
-    search_response=$(make_request GET "/projects?q=name:\"${project_name}\"")
+    # Construct project href
+    project_href="/projects/${project_id}"
 
-    # Extract project href (assumes unique name; takes first match)
-    project_href=$(echo "$search_response" | jq -r '.items[0]?._meta.href // empty')
-
-    if [ "$project_href" = "null" ] || [ -z "$project_href" ]; then
-        echo "  Error: Project '$project_name' not found."
+    # Verify project exists by fetching it
+    verify_response=$(make_request GET "$project_href")
+    if [[ "$verify_response" == *"error"* ]] || [[ "$verify_response" == *"not found"* ]]; then
+        echo "  Error: Project ID '$project_id' not found or inaccessible."
         continue
     fi
 
-    project_id=$(basename "$project_href")
-    echo "  Found project ID: $project_id"
+    echo "  Found project: $project_id"
 
     # Get all versions for the project
     versions_response=$(make_request GET "$project_href/versions")
@@ -94,9 +92,9 @@ while IFS=',' read -r project_name rest; do
     # Finally, delete the project
     project_delete_response=$(make_request DELETE "$project_href")
     if [[ "$project_delete_response" == *"error"* ]]; then
-        echo "  Error: Failed to delete project $project_name: $project_delete_response"
+        echo "  Error: Failed to delete project $project_id: $project_delete_response"
     else
-        echo "  Successfully deleted project: $project_name"
+        echo "  Successfully deleted project: $project_id"
     fi
 
 done < "$CSV_FILE"
