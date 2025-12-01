@@ -5,7 +5,7 @@
 # - CSV file has project IDs in the first column (e.g., "project-id-123,other,stuff"), one per line.
 # - No header row, or skip it manually if present.
 # - Requires 'jq' for JSON parsing (install via package manager if needed).
-# - Projects must have no dependencies beyond code locations and versions (script deletes those first).
+# - Projects have no versions or dependencies to delete first.
 # - Run with: ./delete_projects_by_id.sh <csv_file> <blackduck_url> <api_token>
 # Example: ./delete_projects_by_id.sh projects.csv https://your-blackduck.com eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 
@@ -53,43 +53,7 @@ while IFS=',' read -r project_id rest; do
 
     echo "  Found project: $project_id"
 
-    # Get all versions for the project
-    versions_response=$(make_request GET "$project_href/versions")
-
-    # Delete each version (and its code locations first)
-    echo "$versions_response" | jq -r '.[]._meta.href // empty' | while read -r version_href; do
-        if [ -z "$version_href" ]; then
-            continue
-        fi
-
-        version_id=$(basename "$version_href")
-        echo "    Deleting version: $version_id"
-
-        # Get code locations for this version
-        cl_response=$(make_request GET "$version_href/code-locations")
-
-        # Delete each code location
-        echo "$cl_response" | jq -r '.[]._meta.href // empty' | while read -r cl_href; do
-            if [ -z "$cl_href" ]; then
-                continue
-            fi
-
-            cl_id=$(basename "$cl_href")
-            echo "      Deleting code location: $cl_id"
-            delete_response=$(make_request DELETE "$cl_href")
-            if [[ "$delete_response" == *"error"* ]]; then
-                echo "      Warning: Failed to delete code location $cl_id: $delete_response"
-            fi
-        done
-
-        # Now delete the version
-        version_delete_response=$(make_request DELETE "$version_href")
-        if [[ "$version_delete_response" == *"error"* ]]; then
-            echo "    Warning: Failed to delete version $version_id: $version_delete_response"
-        fi
-    done
-
-    # Finally, delete the project
+    # Delete the project directly
     project_delete_response=$(make_request DELETE "$project_href")
     if [[ "$project_delete_response" == *"error"* ]]; then
         echo "  Error: Failed to delete project $project_id: $project_delete_response"
