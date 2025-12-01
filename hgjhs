@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Script to delete Black Duck projects listed in a CSV file via REST API.
+# Assumptions:
+# - CSV file has project names in the first column (e.g., "project1,other,stuff"), one per line.
+# - No header row, or skip it manually if present.
+# - Requires 'jq' for JSON parsing (install via package manager if needed).
+# - Projects must have no dependencies beyond code locations and versions (script deletes those first).
+# - Run with: ./delete_projects.sh <csv_file> <blackduck_url> <api_token>
+# Example: ./delete_projects.sh projects.csv https://your-blackduck.com eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <csv_file> <blackduck_url> <api_token>"
+    exit 1
+fi
+
+CSV_FILE="$1"
+BLACKDUCK_URL="$2"
+API_TOKEN="$3"
+
+BASE_URL="${BLACKDUCK_URL}/api"
+
+# Function to make authenticated curl request
+make_request() {
+    local method="$1"
+    local endpoint="$2"
+    shift 2
+    curl -s -X "$method" "${BASE_URL}${endpoint}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json" \
+        "$@"
+}
+
+# Read CSV and process each project name
+while IFS=',' read -r project_name rest; do
+    # Trim whitespace from project_name
+    project_name=$(echo "$project_name" | xargs)
+    if [ -z "$project_name" ]; then
+        continue
+    fi
+
+    echo "Processing project: $project_name"
+
+    # Search for the project by exact name
+    search_response=$(make_request GET "/projects?q=name:\"${project_name}\"")
+
+    # Extract project href (assumes unique name; takes first match)
+    project_href=$(echo "$search_response" | jq -r '.items[0]?._meta.href // empty')
+
+    if [ "$project_href" = "null" ] || [ -z "$project_href" ]; then
+        echo "  Error: Project '$project_name' not found."
+        continue
+    fi
+
+    project_id=$(basename "$project_href")
+    echo "  Found project ID: $project_id"
+
+    # Get all versions for the project
+    versions_response=$(make_request GET "$project_href/versions")
+
+    # Delete each version (and its code locations first)
+    echo "$versions_response" | jq -r '.[]._meta.href // empty' | while read -r version_href; do
+        if [ -z "$version_href" ]; then
+            continue
+        fi
+
+        version_id=$(basename "$version_href")
+        echo "    Deleting version: $version_id"
+
+        # Get code locations for this version
+        cl_response=$(make_request GET "$version_href/code-locations")
+
+        # Delete each code location
+        echo "$cl_response" | jq -r '.[]._meta.href // empty' | while read -r cl_href; do
+            if [ -z "$cl_href" ]; then
+                continue
+            fi
+
+            cl_id=$(basename "$cl_href")
+            echo "      Deleting code location: $cl_id"
+            delete_response=$(make_request DELETE "$cl_href")
+            if [[ "$delete_response" == *"error"* ]]; then
+                echo "      Warning: Failed to delete code location $cl_id: $delete_response"
+            fi
+        done
+
+        # Now delete the version
+        version_delete_response=$(make_request DELETE "$version_href")
+        if [[ "$version_delete_response" == *"error"* ]]; then
+            echo "    Warning: Failed to delete version $version_id: $version_delete_response"
+        fi
+    done
+
+    # Finally, delete the project
+    project_delete_response=$(make_request DELETE "$project_href")
+    if [[ "$project_delete_response" == *"error"* ]]; then
+        echo "  Error: Failed to delete project $project_name: $project_delete_response"
+    else
+        echo "  Successfully deleted project: $project_name"
+    fi
+
+done < "$CSV_FILE"
+
+echo "Script completed."
