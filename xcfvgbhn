@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# Simple script to delete Black Duck projects by ID from a CSV file via REST API (with debug logging).
+# Assumptions:
+# - CSV file has one project ID per line.
+# - Run with: ./delete_projects_debug.sh <csv_file> <blackduck_url> <api_token>
+# - Outputs status codes and full responses on failure for debugging.
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <csv_file> <blackduck_url> <api_token>"
+    exit 1
+fi
+
+CSV_FILE="$1"
+BLACKDUCK_URL="$2"
+API_TOKEN="$3"
+
+BASE_URL="${BLACKDUCK_URL}/api"
+
+while read -r project_id; do
+    project_id=$(echo "$project_id" | xargs)
+    if [ -z "$project_id" ]; then
+        continue
+    fi
+
+    echo "Processing project ID: $project_id"
+    project_href="/projects/${project_id}"
+
+    # Verify existence: GET with status
+    verify_output=$(curl -s -i -w "\n%{http_code}" -X GET "${BASE_URL}${project_href}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json")
+    verify_status=$(echo "$verify_output" | tail -n1)
+    verify_body=$(echo "$verify_output" | sed '$d' | head -n -1)
+
+    if [ "$verify_status" != "200" ]; then
+        echo "Error: Project ID '$project_id' not found or inaccessible (Status: $verify_status)."
+        echo "Response: $verify_body"
+        continue
+    fi
+
+    echo "  Verified project exists (Status: $verify_status)."
+
+    # Delete with status
+    delete_output=$(curl -s -i -w "\n%{http_code}" -X DELETE "${BASE_URL}${project_href}" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Accept: application/json")
+    delete_status=$(echo "$delete_output" | tail -n1)
+    delete_body=$(echo "$delete_output" | sed '$d' | head -n -1)
+
+    if [ "$delete_status" != "204" ]; then
+        echo "Error: Failed to delete project $project_id (Status: $delete_status)."
+        echo "Response: $delete_body"
+    else
+        echo "Successfully deleted project: $project_id (Status: $delete_status)."
+    fi
+
+done < "$CSV_FILE"
+
+echo "Done."
