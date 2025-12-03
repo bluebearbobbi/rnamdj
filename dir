@@ -1,3 +1,19 @@
 mkdir -p /tmp/repro-no-main && cd /tmp/repro-no-main && \
 curl -L -O https://detect.synopsys.com/detect8.jar && \
 java -jar detect8.jar --detect.project.name=test --detect.excluded.directories="**/fake-main/**" --logging.level.com.blackduck.integration.detect=DEBUG
+
+
+
+
+# One-liner (copy-paste into Terminal)
+mkdir -p /tmp/repro-debug && cd /tmp/repro-debug && \
+curl -L -O https://detect.synopsys.com/detect9.jar && \
+java -jar detect9.jar \
+  --detect.project.name=DebugTest \
+  --detect.project.version=1.0 \
+  --detect.source.path=. \
+  --detect.excluded.directories="**/nonexistent-deep-dir/**" \
+  --logging.level.com.blackduck.integration.detect=TRACE \
+  --logging.level.root=TRACE \
+  --detect.diagnostic=true \
+  2>&1 | grep -i "DirectoryMatcher\|resolved\|excluded\|warn"
