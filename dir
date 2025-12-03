@@ -1,0 +1,3 @@
+mkdir -p /tmp/repro-no-main && cd /tmp/repro-no-main && \
+curl -L -O https://detect.synopsys.com/detect8.jar && \
+java -jar detect8.jar --detect.project.name=test --detect.excluded.directories="**/fake-main/**" --logging.level.com.blackduck.integration.detect=DEBUG
